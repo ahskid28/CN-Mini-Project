@@ -2,6 +2,61 @@
 
 An HTTP forward proxy implemented in C, based on the group's proxy-server writeup. The executable forwards real HTTP GET/HEAD requests, caches eligible responses, enforces access policies and logs traffic. Python is used only for automated testing and benchmark clients; running the proxy does not require Python.
 
+## Original project writeup
+
+The original proposal is reproduced below, with its wording preserved and formatting adapted for Markdown.
+
+### Computer Networks — Mini Project Write-up
+
+**Group Members:**
+
+- Anveshaa Kabir Basnet (2405418)
+- Ria Gracy (2405448)
+- Diksha Nandi (2405493)
+
+**Project Chosen:** Project 1 — Designing a Proxy Server
+
+### Why We Chose This Project
+
+We selected the proxy server project because it offers a practical, hands-on way to understand application-layer protocol handling, which connects to networking concepts covered so far in this course.
+
+Through this project, we will gain practical experience with HTTP communication, socket programming, concurrent connections, caching, access control, traffic logging and network performance measurement.
+
+It combines multiple important networking concepts in a single system and allows us to demonstrate the working of the system through real client requests rather than only simulated inputs.
+
+### Planned Features
+
+- A forward proxy that handles multiple simultaneous client connections (HTTP)
+- Response caching with a defined cache-hit / cache-miss policy
+- At least one access-control feature — domain blocklisting and/or per-client rate limiting
+- Traffic logging in a format useful for a network administrator (timestamp, client, destination, cache status)
+- Graceful handling of malformed requests and unreachable hosts
+- A performance comparison (latency/throughput) with and without the proxy
+
+### AI Usage Declaration
+
+We plan to use AI tools throughout the project for:
+
+- understanding Computer Networks concepts
+- discussing and refining the system architecture
+- generating initial code structures
+- implementing networking and socket-programming components
+- assisting with HTTP request/response parsing
+- implementing caching and access-control mechanisms
+- debugging errors
+- generating test cases
+- suggesting edge cases
+- improving error handling
+- assisting with performance-testing scripts
+- analyzing test results
+- improving code documentation
+- preparing technical documentation and presentation material
+- explaining unfamiliar code and concepts to team members
+
+AI may be used during all stages of development, including planning, implementation, testing, debugging and documentation.
+
+We will not use AI to generate the entire project without understanding it — every team member will be able to explain and defend the design and code during evaluation. Git commit history will reflect incremental, individual contributions from each member throughout the project period, and our AI usage will remain within what is declared here.
+
 ## Team
 
 | Member | Roll number | Primary responsibility |
