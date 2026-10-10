@@ -1,168 +1,133 @@
+import argparse
 import concurrent.futures
-import http.client
-import json
+import csv
 import socket
-import tempfile
-import threading
+import time
 import unittest
-from pathlib import Path
 
-from proxy.policies import Cache, RateLimiter
-from proxy.server import ProxyServer, cache_ttl, clean_headers
-from scripts.origin import make_origin
+from harness import Lab
 
-
-class Policies(unittest.TestCase):
-    def test_expiry_and_eviction(self):
-        now = [0]
-        cache = Cache(300, lambda: now[0])
-        value = (200, [], b"x" * 100, 0)
-        cache.put("a", value, 2)
-        cache.put("b", value, 2)
-        self.assertIsNone(cache.get("a"))
-        self.assertEqual(cache.get("b"), value)
-        now[0] = 2
-        self.assertIsNone(cache.get("b"))
-
-    def test_rate_window(self):
-        now = [0]
-        limiter = RateLimiter(2, 10, lambda: now[0])
-        self.assertTrue(limiter.allow("a"))
-        self.assertTrue(limiter.allow("a"))
-        self.assertFalse(limiter.allow("a"))
-        self.assertTrue(limiter.allow("b"))
-        now[0] = 10
-        self.assertTrue(limiter.allow("a"))
-
-    def test_cache_directives(self):
-        for header in ("private", "no-cache", "no-store", "max-age=0"):
-            self.assertEqual(cache_ttl([("Cache-Control", header)], 30), 0)
-        self.assertEqual(cache_ttl([("Vary", "Accept")], 30), 0)
-        self.assertEqual(cache_ttl([("Set-Cookie", "a=b")], 30), 0)
-        self.assertEqual(cache_ttl([("Cache-Control", "max-age=10"), ("Age", "3")], 30), 7)
-        self.assertEqual(cache_ttl([("Cache-Control", "max-age=20, s-maxage=5")], 30), 5)
-
-    def test_hop_headers(self):
-        self.assertEqual(clean_headers([("Connection", "X-Secret"), ("X-Secret", "a"),
-                                       ("Proxy-Authorization", "hidden"), ("Accept", "text/plain")]),
-                         [("Accept", "text/plain")])
+BINARY = "./cnproxy"
 
 
-class Integration(unittest.TestCase):
+class ProxyTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.origin = make_origin(0.02)
-        self.proxy = ProxyServer(dict(listen_port=0, allow_private_destinations=True,
-                                      rate_limit=0, blocked_domains=["blocked.example"],
-                                      timeout=1, max_response_bytes=1024,
-                                      log_file=str(Path(self.temp.name) / "traffic.jsonl")))
-        self.threads = []
-        for server in (self.origin, self.proxy):
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            self.threads.append(thread)
-        self.url = f"http://127.0.0.1:{self.origin.server_port}"
+        self.lab = Lab(BINARY, ["--timeout", "1"])
 
     def tearDown(self):
-        for server in (self.proxy, self.origin):
-            server.shutdown()
-            server.server_close()
-        for thread in self.threads:
-            thread.join()
-        self.temp.cleanup()
+        self.lab.close()
 
-    def request(self, target=None, method="GET", headers=None):
-        connection = http.client.HTTPConnection(*self.proxy.server_address, timeout=3)
-        try:
-            connection.request(method, target or self.url + "/", headers=headers or {})
-            response = connection.getresponse()
-            return response.status, dict(response.getheaders()), response.read()
-        finally:
-            connection.close()
-
-    def test_cache_and_log(self):
-        first = self.request()
-        second = self.request()
+    def test_cache(self):
+        first = self.lab.request()
+        second = self.lab.request()
         self.assertEqual(first[0], 200)
-        self.assertEqual(first[1]["X-Proxy-Cache"], "MISS")
-        self.assertEqual(second[1]["X-Proxy-Cache"], "HIT")
         self.assertEqual(first[2], second[2])
-        events = [json.loads(line) for line in self.proxy.log_path.read_text().splitlines()]
-        self.assertEqual([e["cache"] for e in events], ["MISS", "HIT"])
-        self.assertIn("timestamp", events[0])
+        self.assertEqual(first[1]["X-Proxy-Cache"].strip(), "MISS")
+        self.assertEqual(second[1]["X-Proxy-Cache"].strip(), "HIT")
 
-    def test_concurrent_clients(self):
+    def test_concurrency(self):
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            responses = list(pool.map(lambda i: self.request(self.url + f"/?client={i}"), range(16)))
-        self.assertTrue(all(r[0] == 200 for r in responses))
+            results = list(pool.map(lambda i: self.lab.request(f"/?id={i}"), range(16)))
+        self.assertTrue(all(r[0] == 200 for r in results))
 
-    def test_blocklist_and_subdomains(self):
-        for domain in ("blocked.example", "sub.blocked.example"):
-            self.assertEqual(self.request(f"http://{domain}/")[0], 403)
+    def test_blocklist(self):
+        for host in ("blocked.example", "sub.blocked.example"):
+            self.assertEqual(self.lab.request(target=f"http://{host}/")[0], 403)
 
-    def test_bad_targets_and_methods(self):
-        for url in ("/relative", "https://example.com/", "http://user:pass@example.com/", "http://example.com:99999/"):
-            self.assertEqual(self.request(url)[0], 400)
-        self.assertEqual(self.request(method="POST")[0], 405)
-        self.assertEqual(self.request("example.com:443", "CONNECT")[0], 501)
+    def test_targets(self):
+        for url in ("/relative", "https://example.com/", "http://u:p@example.com/", "http://example.com:99999/"):
+            self.assertEqual(self.lab.request(target=url)[0], 400)
 
-    def test_bypass(self):
-        for headers in ({"Authorization": "Bearer demo"}, {"Cookie": "a=b"}, {"Cache-Control": "no-cache"}):
-            self.assertEqual(self.request(headers=headers)[1]["X-Proxy-Cache"], "BYPASS")
-        for _ in range(2):
-            self.assertEqual(self.request(self.url + "/private")[1]["X-Proxy-Cache"], "MISS")
+    def test_methods(self):
+        self.assertEqual(self.lab.request(method="POST")[0], 405)
+        self.assertEqual(self.lab.request(method="CONNECT", target="example.com:443")[0], 501)
 
     def test_head(self):
-        status, headers, body = self.request(method="HEAD")
-        self.assertEqual(status, 200)
-        self.assertEqual(body, b"")
-        self.assertGreater(int(headers["Content-Length"]), 0)
+        result = self.lab.request(method="HEAD")
+        self.assertEqual(result[0], 200)
+        self.assertEqual(result[2], b"")
+        self.assertGreater(int(result[1]["Content-Length"]), 0)
 
-    def test_header_variants_do_not_share_cache(self):
-        self.request(headers={"Accept": "text/plain"})
-        self.assertEqual(self.request(headers={"Accept": "application/json"})[1]["X-Proxy-Cache"], "MISS")
+    def test_bypass(self):
+        for headers in ({"Authorization": "demo"}, {"Cookie": "a=b"}, {"Range": "bytes=0-1"}, {"Cache-Control": "no-cache"}):
+            self.assertEqual(self.lab.request(headers=headers)[1]["X-Proxy-Cache"].strip(), "BYPASS")
 
-    def test_raw_malformed_request(self):
-        with socket.create_connection(self.proxy.server_address, timeout=3) as sock:
-            sock.sendall(b"GET / HTTP/9.9\r\n\r\n")
-            self.assertIn(b"505", sock.recv(4096))
+    def test_not_stored(self):
+        for path in ("/private", "/cookie", "/vary"):
+            for _ in range(2):
+                self.assertEqual(self.lab.request(path)[1]["X-Proxy-Cache"].strip(), "MISS")
 
-    def test_worker_admission_limit(self):
-        self.assertTrue(self.proxy.slots.acquire(blocking=False))
-        # Fill all admission slots without relying on timing of slow clients.
-        acquired = 1
-        try:
-            while self.proxy.slots.acquire(blocking=False):
-                acquired += 1
-            self.assertEqual(self.request()[0], 503)
-        finally:
-            for _ in range(acquired):
-                self.proxy.slots.release()
+    def test_header_variants(self):
+        self.lab.request(headers={"Accept": "text/plain"})
+        self.assertEqual(self.lab.request(headers={"Accept": "application/json"})[1]["X-Proxy-Cache"].strip(), "MISS")
 
-    def test_size_limit_and_unreachable(self):
-        self.assertEqual(self.request(self.url + "/large")[0], 502)
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            unused_port = sock.getsockname()[1]
-        self.assertIn(self.request(f"http://127.0.0.1:{unused_port}/")[0], (502, 504))
+    def test_hop_headers(self):
+        self.assertNotIn("X-Internal", self.lab.request("/hop")[1])
 
-    def test_private_destinations(self):
-        self.proxy.config["allow_private_destinations"] = False
-        self.assertEqual(self.request()[0], 403)
+    def test_binary_body(self):
+        self.assertEqual(self.lab.request("/binary")[2], bytes(range(256)))
+        self.assertEqual(self.lab.request("/binary")[2], bytes(range(256)))
 
-    def test_rate_limit(self):
-        self.proxy.limiter = RateLimiter(1, 60)
-        self.assertEqual(self.request()[0], 200)
-        self.assertEqual(self.request()[0], 429)
+    def test_bad_framing(self):
+        self.assertEqual(self.lab.request(headers={"Content-Length": "2"})[0], 400)
+        with socket.create_connection(("127.0.0.1", self.lab.port)) as sock:
+            sock.sendall(f"GET {self.lab.url}/ HTTP/1.1\r\nHost: local\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n".encode())
+            self.assertIn(b"400", sock.recv(4096))
+
+    def test_large_and_truncated(self):
+        self.assertEqual(self.lab.request("/large")[0], 502)
+        self.assertEqual(self.lab.request("/truncated")[0], 502)
+
+    def test_chunked_is_rejected(self):
+        self.assertEqual(self.lab.request("/chunked")[0], 502)
+
+    def test_unreachable_origin(self):
+        from harness import free_port
+        self.assertEqual(self.lab.request(target=f"http://127.0.0.1:{free_port()}/")[0], 502)
+
+    def test_private_destination_default(self):
+        self.lab.close()
+        self.lab = Lab(BINARY, allow_private=False)
+        self.assertEqual(self.lab.request()[0], 403)
 
     def test_timeout(self):
-        self.origin.delay = 0.1
-        self.proxy.config["timeout"] = 0.01
-        self.assertEqual(self.request()[0], 504)
+        self.assertEqual(self.lab.request("/slow")[0], 504)
 
-    def test_body_rejected(self):
-        self.assertEqual(self.request(headers={"Content-Length": "10"})[0], 400)
+    def test_log(self):
+        self.lab.request()
+        with self.lab.log.open() as stream:
+            rows = list(csv.DictReader(stream))
+        self.assertEqual(rows[-1]["cache"], "MISS")
+        self.assertEqual(rows[-1]["destination"], "127.0.0.1")
+        self.assertEqual(rows[-1]["status"], "200")
+
+    def restart(self, options):
+        self.lab.close()
+        self.lab = Lab(BINARY, options)
+
+    def test_rate_limit(self):
+        self.restart(["--rate", "1", "--window", "1"])
+        # The readiness probe is malformed and does not consume quota.
+        self.assertEqual(self.lab.request()[0], 200)
+        self.assertEqual(self.lab.request()[0], 429)
+        time.sleep(1.05)
+        self.assertEqual(self.lab.request()[0], 200)
+
+    def test_expiry(self):
+        self.restart(["--ttl", "1"])
+        self.lab.request()
+        time.sleep(1.05)
+        self.assertEqual(self.lab.request()[1]["X-Proxy-Cache"].strip(), "MISS")
+
+    def test_eviction(self):
+        for i in range(17):
+            self.lab.request(f"/?cache={i}")
+        self.assertEqual(self.lab.request("/?cache=0")[1]["X-Proxy-Cache"].strip(), "MISS")
 
 
 if __name__ == "__main__":
-    unittest.main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--binary", default=BINARY)
+    args, remaining = parser.parse_known_args()
+    BINARY = args.binary
+    unittest.main(argv=[__file__, *remaining])

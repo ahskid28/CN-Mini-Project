@@ -1,22 +1,37 @@
-name: Python checks
+name: C build and integration tests
 on: [push, pull_request]
 permissions:
   contents: read
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python: ['3.11', '3.12', '3.13']
-    runs-on: ${{ matrix.os }}
+  linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
-      - run: python -m unittest discover -v
-      - run: python -m scripts.benchmark --requests 12 --concurrency 3 --output smoke-results.json
+          python-version: '3.12'
+      - run: make
+      - run: python tests/test_proxy.py --binary ./cnproxy -v
+      - run: python tests/benchmark.py --binary ./cnproxy --output c-benchmark-linux.json
       - uses: actions/upload-artifact@v4
         with:
-          name: benchmark-${{ matrix.os }}-${{ matrix.python }}
-          path: smoke-results.json
+          name: c-proxy-linux
+          path: |
+            cnproxy
+            c-benchmark-linux.json
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: gcc -std=c11 -O2 -Wall -Wextra -Werror -pedantic src/proxy.c -o cnproxy.exe -lws2_32
+      - run: python tests/test_proxy.py --binary ./cnproxy.exe -v
+      - run: python tests/benchmark.py --binary ./cnproxy.exe --output c-benchmark-windows.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-proxy-windows
+          path: |
+            cnproxy.exe
+            c-benchmark-windows.json

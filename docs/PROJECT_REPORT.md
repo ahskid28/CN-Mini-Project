@@ -1,40 +1,30 @@
-# Designing an HTTP forward proxy server
+# Designing a forward proxy in C
 
-## Objective
+## Objective and implementation
 
-Implement and evaluate an application-layer HTTP forward proxy using real client requests. The system demonstrates socket communication, concurrent connections, caching, access control, traffic logging and performance measurement, matching the planned features in the supplied Computer Networks mini-project writeup.
+This project implements the HTTP proxy described in the supplied three-person Computer Networks writeup. C handles socket communication, parsing, concurrent request processing, cache policy, access control and traffic logging. Winsock/native threads support Windows; POSIX sockets/pthreads support Linux. Python appears only in the external test and measurement harness.
 
-## Implementation
+The proxy accepts an absolute HTTP target, validates request framing, applies domain and per-client policies, checks a bounded cache and forwards misses to an origin. Responses are buffered, checked and rebuilt with explicit length/connection framing. Allocated buffers have clear ownership, and independent mutexes protect shared state. A loopback listener and explicit local-destination option make the lab scope visible.
 
-Python's standard library provides the TCP listener, HTTP request parser, HTTP origin client, worker executor and JSON serializer. No third-party runtime packages are necessary. The proxy receives absolute HTTP request targets, validates the destination and request framing, checks rate and domain policies, looks up cacheable requests and forwards misses to the origin. It reconstructs response framing and closes the client connection after one request.
+## Requirement mapping
 
-The fixed worker pool allows simultaneous clients while bounding admitted work. Cache and limiter locks protect shared state. A separate logging lock protects complete JSON Lines records. The default configuration binds only to loopback and rejects non-global origin addresses; the demo configuration explicitly permits the local test origin.
-
-## Features and evidence
-
-| Writeup requirement | Implementation | Verification |
+| Writeup feature | C implementation | Evidence |
 | --- | --- | --- |
-| Concurrent HTTP forward proxy | proxy/server.py worker pool and origin client | Sixteen requests from eight concurrent test clients |
-| Cache hit and miss policy | proxy/policies.py TTL and LRU; server.py eligibility | Identical-request MISS/HIT integration check; expiry and eviction unit check |
-| Access control | Domain/subdomain filter and per-IP rate limit | Blocked host/subdomain, rate window and 429 checks |
-| Useful traffic logs | Structured UTC JSON Lines records | Parsed log fields and MISS/HIT assertions |
-| Malformed/unreachable handling | 400/502/504 responses | Invalid targets, request body, unused origin port, timeout checks |
-| Performance comparison | scripts/benchmark.py | Direct, cold and warm measurements with cache hit counts |
+| Simultaneous HTTP clients | Bounded thread admission and worker function | Concurrent real-socket requests |
+| Cache hit/miss policy | TTL expiry and 16-slot LRU cache | Hit, expiry, eviction and representation-header tests |
+| Access control | Domain/subdomain blocklist and sliding window limiter | 403 and 429 tests, window recovery |
+| Administrator traffic logs | UTC CSV records | Parsed timestamp/client/destination/status/cache columns |
+| Malformed/unreachable handling | Explicit parsing/framing/socket error responses | Bad targets, framing, truncated/oversized bodies and timeout checks |
+| Performance comparison | External harness exercises compiled C process | Direct, cold and warm timing modes with hit counts |
 
-## Local results
+## Performance methodology
 
-The recorded sample uses Windows, Python 3.14, 60 requests per mode, concurrency six and a controlled 50 ms origin delay. Mean latency is 55.764 ms direct, 62.801 ms through the cold proxy and 9.342 ms through the warm cache. Throughput is 104.668, 92.285 and 537.936 requests per second respectively. All 60 warm requests are cache hits; all cold requests are misses. Raw results are retained in benchmark-results.json beside this report.
+The benchmark starts a local HTTP origin with a 50 ms response delay and launches the compiled C binary. Sixty requests are issued per mode with six concurrent clients. Direct requests bypass the proxy; cold requests use distinct query strings; warm requests repeatedly request a primed resource. The output JSON reports mean latency, nearest-rank p95, requests per second and cache hit counts.
 
-The cold proxy's extra work adds overhead. Warm cache requests avoid the origin's response delay and improve throughput in this workload. This result does not establish performance for arbitrary internet traffic; connection timing, origin behavior, hardware, logging cost, response sizes and cacheability all affect the comparison. Each mode uses a fresh TCP connection per request. The warm workload repeatedly requests one small resource, while the cold workload uses unique query strings to force misses.
+Results must come from the C executable. The earlier Python implementation's timings do not establish C performance and are not reused. GitHub Actions retains separate Linux and Windows measurements. The controlled origin makes cache benefits visible but does not establish performance for arbitrary internet workloads.
 
-## Limitations
+## Limits and contribution
 
-The supported methods are GET and HEAD, without bodies; HTTPS CONNECT is not implemented. Responses are bounded and buffered, rather than streamed. Cache rules are intentionally conservative and do not implement full standards-based revalidation. The cache budget estimates payload/header size rather than actual process memory. Socket timeouts do not impose a total deadline on OS DNS resolution. Logging is synchronous, records processing rather than confirmed delivery and has no rotation. This project is intended for a local networking lab.
+The implementation supports IPv4 HTTP GET/HEAD, buffers rather than streams responses, rejects HTTPS CONNECT/chunked origins and closes each connection after one request. It does not implement full RFC cache semantics or revalidation. Resource limits are explicit, and socket operation timeouts do not guarantee total DNS/request deadlines. It is intended for local evaluation.
 
-## Team and AI assistance
-
-Anveshaa Kabir Basnet (2405418), Ria Gracy (2405448) and Diksha Nandi (2405493) are the members named in the source writeup. Proposed responsibilities and an honest incremental contribution workflow are in TEAM_PLAN.md. The implementation and documentation were prepared with AI assistance in the areas declared by the writeup. Individual contribution and understanding must be demonstrated through actual review, improvements and evaluation, rather than inferred from this generated package.
-
-## Further work
-
-Useful extensions are more complete cache freshness parsing, conditional revalidation, fallback across resolved addresses, streamed response bodies, total deadlines and log summaries. Each can become a real member-owned pull request with a regression test and documented behavior.
+The team is Anveshaa Kabir Basnet (2405418), Ria Gracy (2405448), and Diksha Nandi (2405493). Their proposed division and honest Git contribution process are in TEAM_PLAN.md. AI assistance was used for this implementation and documentation in the areas declared by the source writeup. Members should review the code and make their own demonstrable contributions before evaluation.

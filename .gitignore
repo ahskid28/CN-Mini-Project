@@ -1,7 +1,6 @@
+cnproxy
+cnproxy.exe
 __pycache__/
-*.py[cod]
-.venv/
-logs/
+*.csv
+*.o
 benchmark-results.json
-.test-tmp/
-.DS_Store

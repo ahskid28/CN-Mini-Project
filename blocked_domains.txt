@@ -1,0 +1,2 @@
+# Domains and their subdomains are blocked.
+blocked.example

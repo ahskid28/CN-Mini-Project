@@ -1,118 +1,105 @@
-# Computer Networks Mini Project
+# Computer Networks Mini Project in C
 
-A working HTTP forward proxy for a three-person Computer Networks project. It accepts real HTTP client requests, fetches responses from an origin server, caches eligible responses, applies access policies, and writes structured traffic logs.
+An HTTP forward proxy implemented in C, based on the group's proxy-server writeup. The executable forwards real HTTP GET/HEAD requests, caches eligible responses, enforces access policies and logs traffic. Python is used only for automated testing and benchmark clients; running the proxy does not require Python.
 
 ## Team
 
-| Member | Roll number | Primary area |
+| Member | Roll number | Primary responsibility |
 | --- | --- | --- |
-| Anveshaa Kabir Basnet | 2405418 | HTTP forwarding, sockets, concurrency |
-| Ria Gracy | 2405448 | Caching, domain filtering, rate limiting |
-| Diksha Nandi | 2405493 | Logging, integration tests, benchmarks, documentation |
+| Anveshaa Kabir Basnet | 2405418 | Sockets, HTTP forwarding, thread lifecycle |
+| Ria Gracy | 2405448 | Cache, domain blocking, rate limiting |
+| Diksha Nandi | 2405493 | CSV logs, tests, benchmarks, documentation |
 
-These are proposed responsibilities. The supplied implementation is an AI-assisted starting point; each member should study, validate and improve their assigned component and commit their actual work under their own account. The repository does not fabricate individual contribution history.
+This is an AI-assisted implementation. The roles are proposed ownership for review and further work, not invented individual contributions. Each member should understand their component and commit their own actual improvements.
 
-## Features
+## Build
 
-- HTTP GET and HEAD forwarding using sockets and Python's standard HTTP parser.
-- Bounded thread pool; returns 503 when all workers are occupied.
-- Thread-safe memory cache with TTL expiry and least-recently-used eviction.
-- Domain and subdomain blocklist, and sliding-window rate limiting by client IP.
-- JSON Lines logs with UTC timestamp, client, destination, method, status, cache result, body bytes and latency.
-- Invalid-target/body errors, unreachable-origin errors, timeouts and response-size limits.
-- Reproducible direct versus cold-proxy versus warm-cache latency/throughput benchmark.
-- Unit/integration tests and GitHub Actions for Windows and Linux.
-
-## Requirements
-
-Python 3.11 or later. No pip packages are required. Run every command below from the repository root. On Windows, use `py` instead of `python` if necessary, and `curl.exe` instead of the PowerShell `curl` alias.
+Linux or WSL, with GCC and Make installed:
 
 ```sh
-git clone https://github.com/ahskid28/CN-Mini-Project.git
-cd CN-Mini-Project
-python -m unittest discover -v
+make
+./cnproxy --help
+./cnproxy
 ```
 
-## Run the local demonstration
+Windows, with a working MinGW GCC:
 
-Terminal 1 starts an origin server with an artificial 50 ms response delay:
-
-```sh
-python -m scripts.origin --port 8000 --delay 0.05
+```powershell
+gcc -std=c11 -O2 -Wall -Wextra -Werror -pedantic src/proxy.c -o cnproxy.exe -lws2_32
+.\cnproxy.exe --help
+.\cnproxy.exe
 ```
 
-Terminal 2 starts the proxy. The demo configuration allows loopback destinations:
+Use the repository root as the working directory so the default `blocked_domains.txt` is found. The listener binds to `127.0.0.1:8888`. It uses Winsock and native Windows threads on Windows, POSIX sockets and pthreads on Linux.
+
+## Demonstration
+
+In terminal 1, start any HTTP test origin. For example, Python's standard file server:
 
 ```sh
-python -m proxy --config config.demo.json
+python -m http.server 8000 --bind 127.0.0.1
 ```
 
-Terminal 3 sends two identical requests. `--noproxy ""` ensures curl does not bypass the proxy for localhost:
+In terminal 2, allow private destinations for this local lab:
 
 ```sh
-curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/
-curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/
+./cnproxy --allow-private
 ```
 
-Expect `X-Proxy-Cache: MISS`, then `HIT`, and the same response body. To show blocking and a response that is never stored:
+On Windows replace `./cnproxy` with `.\cnproxy.exe`. In terminal 3:
 
 ```sh
+curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/README.md
+curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/README.md
 curl --noproxy "" -i -x http://127.0.0.1:8888 http://blocked.example/
-curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/private
 ```
 
-Read `logs/traffic.jsonl` to see the administrator log. Stop the proxy and origin with Ctrl+C.
+Use `curl.exe` in PowerShell. Expect MISS then HIT for the identical requests and 403 for the blocked domain. Inspect `traffic.csv` for UTC timestamps, client IP, destination, status, cache state, response wire bytes and processing latency.
 
-For an external HTTP origin, run `python -m proxy --config config.json` and send a request to an `http://` URL. That configuration rejects loopback, private and other non-global destination IPs.
+Stop with Ctrl+C. The process stops accepting and waits for active workers. DNS lookup duration depends on the OS resolver and can extend shutdown time.
 
-## Benchmark
+## Options
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--port` | 8888 | Loopback listening port |
+| `--ttl` | 30 | Maximum cache lifetime in seconds; 0 disables storage |
+| `--rate` | 120 | Requests per client IP per sliding window; 0 disables limiting |
+| `--window` | 60 | Sliding-window length in seconds |
+| `--timeout` | 5 | Socket operation and connect wait timeout in seconds |
+| `--blocklist` | blocked_domains.txt | One domain per line; includes subdomains |
+| `--log` | traffic.csv | Append-only CSV log |
+| `--allow-private` | off | Permit local/private IPv4 origins for the lab |
+
+The cache has 16 slots with LRU eviction and at most 1 MiB of response data per slot. Headers are limited to 16 KiB. At most 32 client workers are active. The limiter holds 128 client records, each with at most 1000 request timestamps. When all limiter records have live windows, new client IPs are refused rather than evicting active rate-limit state.
+
+## Tests and benchmarks
+
+Python 3.11+ is needed for the harness only:
 
 ```sh
-python -m scripts.benchmark --requests 60 --concurrency 6 --delay 0.05 --output benchmark-results.json
+python tests/test_proxy.py --binary ./cnproxy -v
+python tests/benchmark.py --binary ./cnproxy --output benchmark-results.json
 ```
 
-The script starts and stops its own origin and proxy on free ports. Cold requests use distinct query strings; the warm run primes the cache first. Rate limiting is disabled only in this controlled benchmark. Inspect hit counts alongside the timing results.
+Windows: use `--binary ./cnproxy.exe`. Tests start a deterministic local origin and launch the compiled C proxy on a free port. They cover concurrent clients, MISS/HIT, expiry, LRU eviction, blocklisting, limits, HEAD, malformed requests, oversized/truncated responses, timeout, response header filtering and CSV logs.
 
-| Mode | Measured mean latency | Measured p95 latency | Requests per second | Cache hits |
-| --- | ---: | ---: | ---: | ---: |
-| Direct | 55.764 ms | 73.807 ms | 104.668 | 0/60 |
-| Cold proxy | 62.801 ms | 77.916 ms | 92.285 | 0/60 |
-| Warm proxy | 9.342 ms | 15.379 ms | 537.936 | 60/60 |
+The benchmark compares direct, cold-proxy and warm-cache modes with 60 requests and six concurrent clients against a controlled 50 ms origin delay. Cold URLs use unique query strings; warm mode primes one resource. JSON includes mean/p95 latency, requests per second and actual hit counts. GitHub Actions builds and runs the suite and benchmark on Linux and Windows, retaining executable and measurement artifacts. The previous Python implementation's timings are not reused as C measurements.
 
-These measurements were collected on Windows with Python 3.14 on 10 October 2026, using six concurrent clients and a 50 ms simulated origin delay. They are an example local result, not a claim about internet-wide performance. Rerun on the evaluation machine. Raw measurements are in [docs/benchmark-results.json](docs/benchmark-results.json).
+## Source and documentation
 
-## Configuration
+- `src/proxy.c`: HTTP parser, forwarding, caching, policies, logging and main loop.
+- `src/platform.h`: Windows/POSIX socket, mutex and time adapters.
+- `tests/`: Python test-only origin, clients and benchmark harness.
+- [Architecture and limitations](docs/ARCHITECTURE.md)
+- [Three-person contribution plan](docs/TEAM_PLAN.md)
+- [Demo and viva guide](docs/DEMO_AND_VIVA.md)
+- [Technical report](docs/PROJECT_REPORT.md)
 
-| Setting | Meaning |
-| --- | --- |
-| `listen_host`, `listen_port` | Bind address and TCP port; default loopback:8888 |
-| `workers` | Maximum simultaneous handlers, default 32 |
-| `timeout` | Socket operation timeout in seconds, default 10 |
-| `cache_ttl` | Maximum local cache lifetime in seconds, default 30 |
-| `cache_max_bytes` | Approximate cache budget including payload/header sizes |
-| `max_response_bytes` | Maximum buffered origin body size |
-| `blocked_domains` | Hostnames; matching includes their subdomains |
-| `rate_limit`, `rate_window` | Requests per client IP per window; limit 0 disables it |
-| `log_file` | JSON Lines file path, relative to the working directory |
-| `allow_private_destinations` | Allows local/private origins; enabled in demo config only |
+## Supported scope
 
-## Project structure
+HTTP GET and HEAD over IPv4 are supported. HTTPS CONNECT returns 501; mutation methods return 405. Outbound requests use HTTP/1.0 and connection-close framing. Chunked origin responses are explicitly rejected with 502; streaming, persistent connections and full RFC cache revalidation are outside this mini-project. Binary bodies are supported.
 
-```text
-proxy/server.py          HTTP handlers, worker pool, forwarding, traffic logging
-proxy/policies.py        TTL/LRU cache and sliding-window limiter
-scripts/origin.py       Repeatable demo origin
-scripts/benchmark.py    Concurrent measurements and JSON export
-tests/test_proxy.py     Policy and real-socket integration checks
-docs/ARCHITECTURE.md    Request flow and design decisions
-docs/TEAM_PLAN.md       Three-person milestones and GitHub workflow
-docs/DEMO_AND_VIVA.md   Evaluation script and explanations
-docs/PROJECT_REPORT.md  Technical report and results
-.github/workflows/      Automated checks on pushes and pull requests
-```
+Only ordinary GET 200 responses can be stored. Authentication, cookies, range, conditional and cache-control request headers bypass caching. Set-Cookie, Vary, private, no-store and no-cache responses are not stored. Origin max-age/s-maxage caps the configured TTL. Parsing is deliberately conservative and is not a full HTTP standards implementation. A default TTL is used when freshness directives are absent.
 
-## Scope and limits
-
-This is an HTTP-only teaching implementation. It intentionally supports GET and HEAD; POST/PUT and other mutations return 405, and HTTPS CONNECT returns 501. It buffers responses rather than streaming, closes connections after one request, and does not implement full RFC cache revalidation. Cacheable GET 200 responses can use a configured heuristic TTL when an origin omits freshness directives. Authenticated/cookie/range/conditional requests bypass caching; responses with `Vary`, `Set-Cookie`, `private`, `no-store` or `no-cache` are not stored.
-
-Keep the proxy on loopback for the lab: it has no user authentication, TLS or log rotation. DNS lookup duration depends on the OS resolver; the configured timeout covers socket operations, not a guaranteed total request deadline. The cache byte budget estimates data sizes rather than Python object overhead. Logs record origin response preparation time rather than confirmed client delivery. See the architecture notes for details.
+The proxy binds to loopback, has no authentication or TLS, and is intended for a local lab. The default destination filter conservatively excludes common private/reserved IPv4 ranges; it is not a comprehensive IANA registry classifier. Cached responses are held until their TTL expires without repeating DNS checks. Logs measure processing time and wire response size, not confirmed client delivery. Windows process termination by the Python harness is abrupt; interactive Ctrl+C uses the shutdown handler.

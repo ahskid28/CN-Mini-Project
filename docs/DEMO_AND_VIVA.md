@@ -1,41 +1,22 @@
-# Demonstration and viva guide
+# Demonstration and viva
 
-## Five minute demonstration
+Build with GCC using the README command. Start a local HTTP origin, start cnproxy with --allow-private and send the same curl request twice. Identify MISS then HIT. Show a blocked domain returning 403 and inspect the CSV log.
 
-1. Explain that the client connects to the proxy, which opens a separate connection to the origin. Show the request-flow diagram.
-2. Start the origin and proxy using the README commands. Send the same URL twice; identify MISS and HIT in response headers.
-3. Send `http://blocked.example/` through the proxy; show 403. Explain that subdomains are also blocked.
-4. Request `/private` twice; show it is never a HIT because the origin sends no-store.
-5. Stop the proxy, copy config.demo.json to config.rate-demo.json, set rate_limit to 2 and rate_window to 60, and restart with that file. Send three requests; show the third returns 429. Restart with config.demo.json afterwards.
-6. Run `python -m unittest discover -v`. Show the malformed target, timeout, unreachable origin and concurrency checks.
-7. Run the benchmark and explain why cold forwarding adds overhead while a cache hit avoids origin delay. Show JSON traffic records and identify timestamp, client, destination and cache status.
+Restart with `--allow-private --rate 2 --window 60`, send three requests and show 429. Restart with `--ttl 1`, fetch a resource, wait two seconds and show another MISS. Run the automated test suite and benchmark; identify mean/p95 latency, throughput and hit counts. Use explicit curl proxy arguments and HTTP URLs.
 
-Use HTTP URLs. HTTPS browser pages usually require CONNECT, which this project does not implement. Curl with explicit proxy arguments makes the demonstration predictable.
+## Explanations each member should know
 
-## Questions everyone should answer
+- A forward proxy is chosen by the client and retrieves resources from origin servers on the client's behalf.
+- TCP is a byte stream: recv may return a partial header or body, and send may write only part of a buffer. Loops and explicit byte counts are necessary.
+- GET through a proxy uses an absolute URL; the origin request uses only the path/query and a Host header.
+- A mutex protects compound cache/limiter changes. Network I/O occurs outside those shared-state locks.
+- Cache hits copy an owned buffer under the lock so eviction by another worker cannot free memory being sent.
+- TTL controls freshness; LRU chooses an eviction victim when the bounded entry table is full.
+- Rate limiting keeps request times in a sliding window per actual client IP.
+- The proxy uses malloc/free for cached copies and response buffers; each error path must release its allocations and sockets.
+- select waits for readiness. Nonblocking connect permits a configured connect wait rather than the OS's potentially long default.
+- Winsock uses SOCKET and closesocket; POSIX uses integer descriptors and close. The platform adapter hides these differences.
+- Warm cache requests avoid origin delay; cold proxy requests still perform origin I/O and add parsing/logging overhead.
+- HTTPS CONNECT needs a distinct bidirectional tunnel path and is not supported here. Chunked origins require a transfer decoder, also outside this implementation.
 
-**What is a forward proxy?** A server selected by the client that retrieves resources from origins on the client's behalf. A reverse proxy is placed in front of origin services on the server side.
-
-**Which layers are involved?** HTTP is at the application layer; TCP provides a reliable byte stream at the transport layer; IP routes packets at the network layer. DNS maps hostnames to addresses before the outbound connection.
-
-**Why does TCP need HTTP framing?** TCP carries bytes and has no request/message boundaries. HTTP parsing, content lengths and chunk framing tell a receiver where messages end.
-
-**Why use locks?** Cache ordering, cache size and request queues are mutable shared state. Multiple handlers can modify them concurrently; compound operations must remain consistent.
-
-**Why a bounded pool?** A fixed admission limit bounds the number of handlers and outbound origin connections. Otherwise slow clients could create unbounded threads or queued work.
-
-**What do TTL and LRU do?** TTL bounds how long cached data remains fresh locally. LRU chooses which entry to remove when the memory budget is full. They solve different problems.
-
-**Why skip responses with cookies or Vary?** Cookies may personalize a response. Vary declares additional representation selection rules. This project uses a conservative policy and refuses to cache those responses.
-
-**What is the rate-limit algorithm?** For each client IP, remove timestamps older than the configured window; reject if the number remaining reaches the limit, otherwise append now.
-
-**Why block subdomains?** Exact-name blocking alone would permit sub.blocked.example. A suffix match with a dot boundary also blocks subdomains without blocking unrelated names such as notblocked.example.
-
-**Why does cold proxy latency increase?** The proxy performs parsing, policy checks, a second connection and logging. A cold fetch still waits for the origin. A warm hit avoids origin work.
-
-**How is throughput measured?** Completed requests divided by elapsed wall time. Mean and p95 describe per-request latencies under the configured concurrency. There are no failed requests counted as successful samples.
-
-**Why not HTTPS?** CONNECT establishes a byte tunnel to an HTTPS endpoint. Adding it would introduce a separate bidirectional forwarding path, and the encrypted content could not be inspected/cached by this HTTP parser.
-
-**What should be improved for production?** Authentication, complete HTTP/cache semantics, streamed bodies, total request deadlines, resilient address selection, log rotation, resource profiling and stronger configuration validation.
+For evaluation, explain actual limits honestly: IPv4 GET/HEAD, HTTP/1.0 outbound, no streaming/full RFC cache revalidation, bounded buffers and threads, and no guaranteed total DNS/request deadline.
