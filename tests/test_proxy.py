@@ -53,7 +53,7 @@ class ProxyTests(unittest.TestCase):
             self.assertEqual(self.lab.request(headers=headers)[1]["X-Proxy-Cache"].strip(), "BYPASS")
 
     def test_not_stored(self):
-        for path in ("/private", "/cookie", "/vary"):
+        for path in ("/private", "/cookie", "/vary", "/zero-ttl"):
             for _ in range(2):
                 self.assertEqual(self.lab.request(path)[1]["X-Proxy-Cache"].strip(), "MISS")
 

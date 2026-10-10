@@ -32,7 +32,10 @@ class Origin(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body) + (10 if self.path == "/truncated" else 0)))
-        self.send_header("Cache-Control", "no-store" if self.path == "/private" else "public, max-age=30")
+        control = "no-store" if self.path == "/private" else "public, max-age=30"
+        if self.path == "/zero-ttl":
+            control = 'public, max-age = "0"'
+        self.send_header("Cache-Control", control)
         if self.path == "/cookie":
             self.send_header("Set-Cookie", "demo=1")
         if self.path == "/vary":

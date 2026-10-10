@@ -86,6 +86,18 @@ Windows: use `--binary ./cnproxy.exe`. Tests start a deterministic local origin 
 
 The benchmark compares direct, cold-proxy and warm-cache modes with 60 requests and six concurrent clients against a controlled 50 ms origin delay. Cold URLs use unique query strings; warm mode primes one resource. JSON includes mean/p95 latency, requests per second and actual hit counts. GitHub Actions builds and runs the suite and benchmark on Linux and Windows, retaining executable and measurement artifacts. The previous Python implementation's timings are not reused as C measurements.
 
+## Measured C results
+
+The initial C build passed 21 integration tests on both Linux and Windows. On the Windows GitHub runner, the 60-request benchmark measured:
+
+| Mode | Mean latency | p95 latency | Requests per second | Cache hits |
+| --- | ---: | ---: | ---: | ---: |
+| Direct | 53.056 ms | 62.464 ms | 108.647 | 0 |
+| Cold C proxy | 70.310 ms | 91.191 ms | 80.506 | 0 |
+| Warm C cache | 4.132 ms | 19.587 ms | 985.500 | 60 |
+
+These are controlled local-origin measurements with an artificial 50 ms delay, not internet performance guarantees. [Recorded measurements](docs/benchmark-windows.json) identify the exact source commit and workflow run. Rerun on your evaluation machine.
+
 ## Source and documentation
 
 - `src/proxy.c`: HTTP parser, forwarding, caching, policies, logging and main loop.

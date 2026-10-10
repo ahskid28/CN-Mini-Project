@@ -1,0 +1,13 @@
+{
+  "source_commit": "73d677263067af18297f043ad391530396b3a9a7",
+  "source_run": "https://github.com/ahskid28/CN-Mini-Project/actions/runs/38040016583",
+  "platform": "GitHub Actions Windows Server 2025",
+  "requests": 60,
+  "concurrency": 6,
+  "origin_delay_ms": 50,
+  "results": [
+    {"mode": "direct", "mean_ms": 53.056, "p95_ms": 62.464, "requests_per_second": 108.647, "cache_hits": 0},
+    {"mode": "proxy_cold", "mean_ms": 70.31, "p95_ms": 91.191, "requests_per_second": 80.506, "cache_hits": 0},
+    {"mode": "proxy_warm", "mean_ms": 4.132, "p95_ms": 19.587, "requests_per_second": 985.5, "cache_hits": 60}
+  ]
+}
