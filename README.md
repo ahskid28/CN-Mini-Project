@@ -1,4 +1,4 @@
-# Computer Networks Mini Project in C
+# Computer Networks Mini Project
 
 An HTTP forward proxy implemented in C, based on the group's proxy-server writeup. The executable forwards real HTTP GET/HEAD requests, caches eligible responses, enforces access policies and logs traffic. Python is used only for automated testing and benchmark clients; running the proxy does not require Python.
 
