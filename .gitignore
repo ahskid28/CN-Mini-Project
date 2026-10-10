@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.venv/
+logs/
+benchmark-results.json
+.test-tmp/
+.DS_Store
