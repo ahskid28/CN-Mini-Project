@@ -53,7 +53,6 @@ We plan to use AI tools throughout the project for:
 
 AI may be used during all stages of development, including planning, implementation, testing, debugging and documentation.
 
-We will not use AI to generate the entire project without understanding it — every team member will be able to explain and defend the design and code during evaluation. Git commit history will reflect incremental, individual contributions from each member throughout the project period, and our AI usage will remain within what is declared here.
 
 ## Team
 
