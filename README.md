@@ -53,7 +53,6 @@ We plan to use AI tools throughout the project for:
 
 AI may be used during all stages of development, including planning, implementation, testing, debugging and documentation.
 
-
 ## Team
 
 | Member | Roll number | Primary responsibility |
