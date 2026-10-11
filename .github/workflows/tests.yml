@@ -1,4 +1,4 @@
-name: C build and integration tests
+name: All C build and tests
 on: [push, pull_request]
 permissions:
   contents: read
@@ -7,31 +7,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: make
-      - run: python tests/test_proxy.py --binary ./cnproxy -v
-      - run: python tests/benchmark.py --binary ./cnproxy --output c-benchmark-linux.json
+      - run: make test
+      - run: make benchmark
       - uses: actions/upload-artifact@v4
         with:
-          name: c-proxy-linux
+          name: c-project-linux
           path: |
             cnproxy
-            c-benchmark-linux.json
+            origin
+            test_proxy
+            cnbenchmark
+            benchmark-results.json
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: gcc -std=c11 -O2 -Wall -Wextra -Werror -pedantic src/proxy.c -o cnproxy.exe -lws2_32
-      - run: python tests/test_proxy.py --binary ./cnproxy.exe -v
-      - run: python tests/benchmark.py --binary ./cnproxy.exe --output c-benchmark-windows.json
+      - shell: pwsh
+        run: |
+          foreach ($item in @(@('src/proxy.c','cnproxy'), @('tests/origin.c','origin'), @('tests/test_proxy.c','test_proxy'), @('tests/benchmark.c','cnbenchmark'))) {
+            gcc -std=c11 -O2 -Wall -Wextra -Werror -pedantic $item[0] -o ($item[1] + '.exe') -lws2_32
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - run: ./test_proxy.exe ./cnproxy.exe ./origin.exe
+      - run: ./cnbenchmark.exe ./cnproxy.exe ./origin.exe benchmark-results.json
       - uses: actions/upload-artifact@v4
         with:
-          name: c-proxy-windows
+          name: c-project-windows
           path: |
-            cnproxy.exe
-            c-benchmark-windows.json
+            *.exe
+            benchmark-results.json
+
