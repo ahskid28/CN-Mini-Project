@@ -1,6 +1,6 @@
 # Computer Networks Mini Project
 
-An HTTP forward proxy implemented in C, based on the group's proxy-server writeup. The executable forwards real HTTP GET/HEAD requests, caches eligible responses, enforces access policies and logs traffic. Python is used only for automated testing and benchmark clients; running the proxy does not require Python.
+An HTTP forward proxy implemented in C, based on the group's proxy-server writeup. The executable forwards real HTTP GET/HEAD requests, caches eligible responses, enforces access policies and logs traffic. The proxy, integration tests, benchmark clients and demonstration origin are entirely C. No Python runtime is required.
 
 
 
@@ -81,14 +81,22 @@ gcc -std=c11 -O2 -Wall -Wextra -Werror -pedantic src/proxy.c -o cnproxy.exe -lws
 .\cnproxy.exe
 ```
 
+Build the C companion programs on Windows:
+
+```powershell
+gcc -std=c11 -O2 -Wall -Wextra -Werror -pedantic tests/origin.c -o origin.exe -lws2_32
+gcc -std=c11 -O2 -Wall -Wextra -Werror -pedantic tests/test_proxy.c -o test_proxy.exe -lws2_32
+gcc -std=c11 -O2 -Wall -Wextra -Werror -pedantic tests/benchmark.c -o cnbenchmark.exe -lws2_32
+```
+
 Use the repository root as the working directory so the default `blocked_domains.txt` is found. The listener binds to `127.0.0.1:8888`. It uses Winsock and native Windows threads on Windows, POSIX sockets and pthreads on Linux.
 
 ## Demonstration
 
-In terminal 1, start any HTTP test origin. For example, Python's standard file server:
+In terminal 1, start the included C demonstration origin:
 
 ```sh
-python -m http.server 8000 --bind 127.0.0.1
+./origin --port 8000
 ```
 
 In terminal 2, allow private destinations for this local lab:
@@ -97,11 +105,11 @@ In terminal 2, allow private destinations for this local lab:
 ./cnproxy --allow-private
 ```
 
-On Windows replace `./cnproxy` with `.\cnproxy.exe`. In terminal 3:
+The demo origin serves a fixed body and special test endpoints; it is not a file server. On Windows replace `./cnproxy` with `.\cnproxy.exe`. In terminal 3:
 
 ```sh
-curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/README.md
-curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/README.md
+curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/
+curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/
 curl --noproxy "" -i -x http://127.0.0.1:8888 http://blocked.example/
 ```
 
@@ -126,20 +134,20 @@ The cache has 16 slots with LRU eviction and at most 1 MiB of response data per 
 
 ## Tests and benchmarks
 
-Python 3.11+ is needed for the harness only:
+Build and run the C harness:
 
 ```sh
-python tests/test_proxy.py --binary ./cnproxy -v
-python tests/benchmark.py --binary ./cnproxy --output benchmark-results.json
+make test
+make benchmark
 ```
 
-Windows: use `--binary ./cnproxy.exe`. Tests start a deterministic local origin and launch the compiled C proxy on a free port. They cover concurrent clients, MISS/HIT, expiry, LRU eviction, blocklisting, limits, HEAD, malformed requests, oversized/truncated responses, timeout, response header filtering and CSV logs.
+Windows: run `.\test_proxy.exe .\cnproxy.exe .\origin.exe` and `.\cnbenchmark.exe .\cnproxy.exe .\origin.exe benchmark-results.json`. Tests start a deterministic local origin and launch the compiled C proxy on a free port. They cover concurrent clients, MISS/HIT, expiry, LRU eviction, blocklisting, limits, HEAD, malformed requests, oversized/truncated responses, timeout, response header filtering and CSV logs.
 
-The benchmark compares direct, cold-proxy and warm-cache modes with 60 requests and six concurrent clients against a controlled 50 ms origin delay. Cold URLs use unique query strings; warm mode primes one resource. JSON includes mean/p95 latency, requests per second and actual hit counts. GitHub Actions builds and runs the suite and benchmark on Linux and Windows, retaining executable and measurement artifacts. The previous Python implementation's timings are not reused as C measurements.
+The benchmark compares direct, cold-proxy and warm-cache modes with 60 requests and six concurrent clients against a controlled 50 ms origin delay. Cold URLs use unique query strings; warm mode primes one resource. JSON includes mean/p95 latency, requests per second and actual hit counts. GitHub Actions builds and runs the suite and benchmark on Linux and Windows, retaining executable and measurement artifacts. The C benchmark verifies actual hit counts.
 
 ## Measured C results
 
-The initial C build passed 21 integration tests on both Linux and Windows. On the Windows GitHub runner, the 60-request benchmark measured:
+The upstream C proxy build passed 21 integration tests on both Linux and Windows. The following table is historical, from the upstream Python-driven benchmark; it is not a measurement of the new all-C harness. On the Windows GitHub runner, the 60-request benchmark measured:
 
 | Mode | Mean latency | p95 latency | Requests per second | Cache hits |
 | --- | ---: | ---: | ---: | ---: |
@@ -153,10 +161,8 @@ These are controlled local-origin measurements with an artificial 50 ms delay, n
 
 - `src/proxy.c`: HTTP parser, forwarding, caching, policies, logging and main loop.
 - `src/platform.h`: Windows/POSIX socket, mutex and time adapters.
-- `tests/`: Python test-only origin, clients and benchmark harness.
+- `tests/`: C test origin, integration tests, concurrent clients and benchmark harness.
 - [Architecture and limitations](docs/ARCHITECTURE.md)
-- [Three-person contribution plan](docs/TEAM_PLAN.md)
-- [Demo and viva guide](docs/DEMO_AND_VIVA.md)
 - [Technical report](docs/PROJECT_REPORT.md)
 
 ## Supported scope
@@ -165,4 +171,5 @@ HTTP GET and HEAD over IPv4 are supported. HTTPS CONNECT returns 501; mutation m
 
 Only ordinary GET 200 responses can be stored. Authentication, cookies, range, conditional and cache-control request headers bypass caching. Set-Cookie, Vary, private, no-store and no-cache responses are not stored. Origin max-age/s-maxage caps the configured TTL. Parsing is deliberately conservative and is not a full HTTP standards implementation. A default TTL is used when freshness directives are absent.
 
-The proxy binds to loopback, has no authentication or TLS, and is intended for a local lab. The default destination filter conservatively excludes common private/reserved IPv4 ranges; it is not a comprehensive IANA registry classifier. Cached responses are held until their TTL expires without repeating DNS checks. Logs measure processing time and wire response size, not confirmed client delivery. Windows process termination by the Python harness is abrupt; interactive Ctrl+C uses the shutdown handler.
+The proxy binds to loopback, has no authentication or TLS, and is intended for a local lab. The default destination filter conservatively excludes common private/reserved IPv4 ranges; it is not a comprehensive IANA registry classifier. Cached responses are held until their TTL expires without repeating DNS checks. Logs measure processing time and wire response size, not confirmed client delivery. Windows process termination by the C harness is abrupt; interactive Ctrl+C uses the shutdown handler.
+
