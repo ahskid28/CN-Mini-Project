@@ -69,14 +69,29 @@ static void error_response(socket_t s, int code, const char *reason, int head) {
     }
     send_all(s, buffer, (size_t)n);
 }
+
 static int blocked(const char *host) {
     int i;
     size_t n = strlen(host);
+
+    /* Treat a trailing dot as equivalent to no trailing dot. */
+    if (n > 0 && host[n - 1] == '.') {
+        n--;
+    }
+
     for (i = 0; i < block_count; i++) {
         size_t k = strlen(blocks[i]);
-        if (!strcasecmp(host, blocks[i]) ||
-            (n > k && host[n-k-1] == '.' && !strcasecmp(host+n-k, blocks[i]))) return 1;
+
+        if (n == k && !strncasecmp(host, blocks[i], n)) {
+            return 1;
+        }
+
+        if (n > k && host[n - k - 1] == '.' &&
+            !strncasecmp(host + n - k, blocks[i], k)) {
+            return 1;
+        }
     }
+
     return 0;
 }
 static int rate_allowed(uint32_t ip) {
@@ -105,22 +120,45 @@ static int rate_allowed(uint32_t ip) {
     r->times[r->count++] = now;
     mutex_unlock(&rate_mutex); return 1;
 }
+
 static char *cache_get(const char *key, size_t *length) {
     int i;
     char *result = NULL;
     double now = now_seconds();
+
     mutex_lock(&cache_mutex);
+
     for (i = 0; i < CACHE_SLOTS; i++) {
-        if (cache[i].key && cache[i].expires > now && !strcmp(cache[i].key, key)) {
+        if (!cache[i].key) {
+            continue;
+        }
+
+        if (cache[i].expires <= now) {
+            free(cache[i].key);
+            free(cache[i].data);
+            cache[i].key = NULL;
+            cache[i].data = NULL;
+            cache[i].len = 0;
+            cache[i].expires = 0;
+            cache[i].used = 0;
+            continue;
+        }
+
+        if (!strcmp(cache[i].key, key)) {
             result = malloc(cache[i].len);
+
             if (result) {
                 memcpy(result, cache[i].data, cache[i].len);
-                *length = cache[i].len; cache[i].used = now;
+                *length = cache[i].len;
+                cache[i].used = now;
             }
+
             break;
         }
     }
-    mutex_unlock(&cache_mutex); return result;
+
+    mutex_unlock(&cache_mutex);
+    return result;
 }
 static void cache_put(const char *key, const char *data, size_t n, int lifetime) {
     int i, slot = 0;
