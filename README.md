@@ -2,8 +2,6 @@
 
 An HTTP forward proxy implemented in C, based on the group's proxy-server writeup. The executable forwards real HTTP GET/HEAD requests, caches eligible responses, enforces access policies and logs traffic. The proxy, integration tests, benchmark clients and demonstration origin are entirely C. No Python runtime is required.
 
-
-
 ### Computer Networks — Mini Project Write-up
 
 **Group Members:**
@@ -18,22 +16,22 @@ An HTTP forward proxy implemented in C, based on the group's proxy-server writeu
 
 We selected the proxy server project because it offers a practical, hands-on way to understand application-layer protocol handling, which connects to networking concepts covered so far in this course.
 
-Through this project, we will gain practical experience with HTTP communication, socket programming, concurrent connections, caching, access control, traffic logging and network performance measurement.
+This project provides practical experience with HTTP communication, socket programming, concurrent connections, caching, access control, traffic logging and network performance measurement.
 
 It combines multiple important networking concepts in a single system and allows us to demonstrate the working of the system through real client requests rather than only simulated inputs.
 
-### Planned Features
+### Implemented Features
 
 - A forward proxy that handles multiple simultaneous client connections (HTTP)
 - Response caching with a defined cache-hit / cache-miss policy
-- At least one access-control feature — domain blocklisting and/or per-client rate limiting
+- Domain blocklisting and per-client rate limiting
 - Traffic logging in a format useful for a network administrator (timestamp, client, destination, cache status)
 - Graceful handling of malformed requests and unreachable hosts
 - A performance comparison (latency/throughput) with and without the proxy
 
 ### AI Usage Declaration
 
-We plan to use AI tools throughout the project for:
+AI tools have assisted with the project in these areas:
 
 - understanding Computer Networks concepts
 - discussing and refining the system architecture
@@ -45,7 +43,7 @@ We plan to use AI tools throughout the project for:
 - generating test cases
 - suggesting edge cases
 - improving error handling
-- assisting with performance-testing scripts
+- assisting with C performance-testing programs
 - analyzing test results
 - improving code documentation
 - preparing technical documentation and presentation material
@@ -105,7 +103,7 @@ In terminal 2, allow private destinations for this local lab:
 ./cnproxy --allow-private
 ```
 
-The demo origin serves a fixed body and special test endpoints; it is not a file server. On Windows replace `./cnproxy` with `.\cnproxy.exe`. In terminal 3:
+The demo origin serves a fixed response and special test endpoints. On Windows use `.\origin.exe --port 8000` in terminal 1 and `.\cnproxy.exe --allow-private` in terminal 2. In terminal 3:
 
 ```sh
 curl --noproxy "" -i -x http://127.0.0.1:8888 http://127.0.0.1:8000/
@@ -115,7 +113,7 @@ curl --noproxy "" -i -x http://127.0.0.1:8888 http://blocked.example/
 
 Use `curl.exe` in PowerShell. Expect MISS then HIT for the identical requests and 403 for the blocked domain. Inspect `traffic.csv` for UTC timestamps, client IP, destination, status, cache state, response wire bytes and processing latency.
 
-Stop with Ctrl+C. The process stops accepting and waits for active workers. DNS lookup duration depends on the OS resolver and can extend shutdown time.
+Stop both servers with Ctrl+C. The proxy stops accepting and waits for active workers. DNS lookup duration depends on the OS resolver and can extend shutdown time.
 
 ## Options
 
@@ -141,27 +139,43 @@ make test
 make benchmark
 ```
 
-Windows: run `.\test_proxy.exe .\cnproxy.exe .\origin.exe` and `.\cnbenchmark.exe .\cnproxy.exe .\origin.exe benchmark-results.json`. Tests start a deterministic local origin and launch the compiled C proxy on a free port. They cover concurrent clients, MISS/HIT, expiry, LRU eviction, blocklisting, limits, HEAD, malformed requests, oversized/truncated responses, timeout, response header filtering and CSV logs.
+On Windows, after compiling all four programs:
+
+```powershell
+.\test_proxy.exe .\cnproxy.exe .\origin.exe
+.\cnbenchmark.exe .\cnproxy.exe .\origin.exe benchmark-results.json
+```
+
+The harness starts and cleans up its own origin and proxy processes. Run from the repository root so `blocked_domains.txt` is available. The integration suite contains **42 checks**, including 16 concurrent requests. Tests start a deterministic local origin and launch the compiled C proxy on a free port. They cover concurrent clients, MISS/HIT, expiry, LRU eviction, blocklisting, limits, HEAD, malformed requests, oversized/truncated responses, timeout, response header filtering and CSV logs.
 
 The benchmark compares direct, cold-proxy and warm-cache modes with 60 requests and six concurrent clients against a controlled 50 ms origin delay. Cold URLs use unique query strings; warm mode primes one resource. JSON includes mean/p95 latency, requests per second and actual hit counts. GitHub Actions builds and runs the suite and benchmark on Linux and Windows, retaining executable and measurement artifacts. The C benchmark verifies actual hit counts.
 
-## Measured C results
+## Validation and measured results
 
-The upstream C proxy build passed 21 integration tests on both Linux and Windows. The following table is historical, from the upstream Python-driven benchmark; it is not a measurement of the new all-C harness. On the Windows GitHub runner, the 60-request benchmark measured:
+All four C programs compiled on Windows x64 with GCC 16.2.0 using `-std=c11 -O2 -Wall -Wextra -Werror -pedantic`. The integration suite passed **42 checks with zero failures**. Linux support and CI are included; Linux was not tested locally.
+
+The all-C benchmark measured the following on 11 October 2026, with 60 requests per mode, six concurrent clients and a controlled 50 ms origin delay:
 
 | Mode | Mean latency | p95 latency | Requests per second | Cache hits |
 | --- | ---: | ---: | ---: | ---: |
-| Direct | 53.056 ms | 62.464 ms | 108.647 | 0 |
-| Cold C proxy | 70.310 ms | 91.191 ms | 80.506 | 0 |
-| Warm C cache | 4.132 ms | 19.587 ms | 985.500 | 60 |
+| Direct | 61.967 ms | 63.000 ms | 96.000 | 0 |
+| Cold proxy | 71.883 ms | 79.000 ms | 78.329 | 0 |
+| Warm cache | 2.350 ms | 16.000 ms | 1935.484 | 60 |
 
-These are controlled local-origin measurements with an artificial 50 ms delay, not internet performance guarantees. [Recorded measurements](docs/benchmark-windows.json) identify the exact source commit and workflow run. Rerun on your evaluation machine.
+These local measurements illustrate caching with a delayed origin. They do not predict internet performance. Windows clock resolution can quantize short samples. Rerun `make benchmark` or the Windows command above to generate `benchmark-results.json` on your machine. The benchmark verifies zero cold hits and 60 warm hits and exits with an error if requests fail or hit counts differ.
+
+[The older upstream measurements](docs/benchmark-windows.json) are historical results from the previous test harness. They are separate from the all-C measurements above.
 
 ## Source and documentation
 
 - `src/proxy.c`: HTTP parser, forwarding, caching, policies, logging and main loop.
 - `src/platform.h`: Windows/POSIX socket, mutex and time adapters.
-- `tests/`: C test origin, integration tests, concurrent clients and benchmark harness.
+- `tests/origin.c`: concurrent HTTP demo and test origin.
+- `tests/lab.h`: HTTP client, socket utilities and process lifecycle.
+- `tests/clients.h`: concurrent request workers.
+- `tests/test_proxy.c`: C integration suite.
+- `tests/benchmark.c`: direct, cold-proxy and warm-cache benchmark.
+- [All-C conversion, validation and quick start](docs/ALL_C.md)
 - [Architecture and limitations](docs/ARCHITECTURE.md)
 - [Technical report](docs/PROJECT_REPORT.md)
 
