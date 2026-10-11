@@ -4,3 +4,12 @@ __pycache__/
 *.csv
 *.o
 benchmark-results.json
+
+
+origin
+origin.exe
+test_proxy
+test_proxy.exe
+cnbenchmark
+cnbenchmark.exe
+lab-*.csv
