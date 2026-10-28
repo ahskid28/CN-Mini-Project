@@ -1,6 +1,6 @@
 # Computer Networks Mini Project
 
-An HTTP forward proxy implemented in C, based on the group's proxy-server writeup. The executable forwards real HTTP GET/HEAD requests, caches eligible responses, enforces access policies and logs traffic. The proxy, integration tests, benchmark clients and demonstration origin are entirely C. No Python runtime is required.
+An HTTP forward proxy implemented in C. The executable forwards real HTTP GET/HEAD requests, caches eligible responses, enforces access policies and logs traffic. The proxy, integration tests, benchmark clients and demonstration origin are entirely C. 
 
 ### Computer Networks — Mini Project Write-up
 
